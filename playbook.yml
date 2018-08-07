@@ -1,0 +1,103 @@
+---
+
+- hosts: all
+
+  vars_files:
+    - defaults/main.yml
+    - vars.yml
+
+  tasks:
+    - name: Check if Docker installed
+      stat:
+        path: /usr/bin/docker
+      register: docker
+
+    - block:
+      - name: Add docker repo requirements
+        package:
+          name: "{{ item }}"
+          state: present
+        with_items:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - software-properties-common
+
+      - name: Add docker repo key
+        apt_key:
+          keyserver: hkp://keyserver.ubuntu.com:80
+          id: '0EBFCD88'
+          state: present
+
+      - name: Add docker repo
+        apt_repository:
+          repo: deb https://download.docker.com/linux/ubuntu bionic stable
+
+      - name: Install docker-ce
+        package:
+          name: docker-ce
+          state: present
+
+      - name: Ensure docker starts on startup
+        command: systemctl enable docker
+
+      when: docker.stat.exists != true
+
+    - name: Install Docker Compose
+      get_url:
+        url: https://github.com/docker/compose/releases/download/1.22.0/docker-compose-Linux-x86_64
+        dest: /usr/local/bin/docker-compose
+        mode: "+x"
+
+    - block:
+      - name: Configure firewall
+        ufw:
+          rule: allow
+          port: "{{ item }}"
+        with_items: "{{ ufw_allow_ports }}"
+
+      - name: Enable firewall
+        ufw:
+          state: enabled
+
+      when: add_firewall_rules
+
+    - name: Copy Traefik docker-compose
+      copy:
+        src: docker/traefik
+        dest: /opt/
+
+    - name: Run Traefik
+      command: docker-compose up -d
+      args:
+        chdir: /opt/traefik
+      environment:
+        COMPOSE_PROJECT_NAME: traefik
+        LE_EMAIL: "{{ lookup('env', 'LE_EMAIL') }}"
+      register: traefik_changed
+      changed_when: "'up-to-date' not in traefik_changed.stderr"
+
+- hosts: ci
+
+  vars_files:
+    - defaults/main.yml
+    - vars.yml
+
+  tasks:
+    - name: Copy Drone docker-compose
+      copy:
+        src: docker/drone
+        dest: /opt/
+
+    - name: Run Drone
+      command: docker-compose up -d
+      args:
+        chdir: /opt/drone
+      environment:
+        COMPOSE_PROJECT_NAME: drone
+        DRONE_HOST: "{{ lookup('env', 'DRONE_HOST') }}"
+        DRONE_GITHUB_CLIENT: "{{ lookup('env', 'DRONE_GITHUB_CLIENT') }}"
+        DRONE_GITHUB_SECRET: "{{ lookup('env', 'DRONE_GITHUB_SECRET') }}"
+        DRONE_SECRET: "{{ lookup('env', 'DRONE_SECRET') }}"
+      register: drone_changed
+      changed_when: "'up-to-date' not in drone_changed.stderr"

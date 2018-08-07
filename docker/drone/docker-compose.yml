@@ -1,0 +1,44 @@
+version: '3.2'
+networks:
+  private:
+  public:
+    external:
+      name: traefik_webgateway
+volumes:
+  drone:
+services:
+  server:
+    image: drone/drone:0.8
+    environment:
+      - DRONE_OPEN=false
+      - DRONE_ADMIN=jtreminio
+      - DRONE_HOST=https://${DRONE_HOST}
+      - DRONE_GITHUB=true
+      - DRONE_GITHUB_CLIENT=${DRONE_GITHUB_CLIENT}
+      - DRONE_GITHUB_SECRET=${DRONE_GITHUB_SECRET}
+      - DRONE_SECRET=${DRONE_SECRET}
+    labels:
+      - traefik.backend=drone_server
+      - traefik.docker.network=traefik_webgateway
+      - traefik.frontend.rule=Host:${DRONE_HOST}
+      - traefik.port=8000
+    networks:
+      - private
+      - public
+    volumes:
+      - drone:/var/lib/drone/
+  agent:
+    image: drone/agent:0.8
+    command: agent
+    depends_on:
+      - server
+    environment:
+      - DRONE_SERVER=server:9000
+      - DRONE_SECRET=${DRONE_SECRET}
+    labels:
+      - traefik.enable=false
+    networks:
+      - private
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
